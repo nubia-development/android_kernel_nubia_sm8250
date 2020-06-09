@@ -18,6 +18,22 @@
 #include <linux/pwm.h>
 #include <linux/regmap.h>
 #include <linux/types.h>
+#include <linux/ctype.h>
+
+#define LOG_TAG		"QTI_TRI_LED"
+#define LED_DEBUG(fmt, args...) \
+do { \
+        printk(KERN_DEBUG "[%s] [%s:%d] " fmt,\
+                                        LOG_TAG, __FUNCTION__, __LINE__, ##args); \
+} while (0)
+
+#define LED_ERR(fmt, args...) \
+do { \
+        printk(KERN_ERR "[%s] [%s:%d] " fmt,\
+                                        LOG_TAG, __FUNCTION__, __LINE__, ##args); \
+} while (0)
+
+
 
 #define TRILED_REG_TYPE			0x04
 #define TRILED_REG_SUBTYPE		0x05
@@ -347,6 +363,241 @@ static int qpnp_tri_led_set_blink(struct led_classdev *led_cdev,
 	mutex_unlock(&led->lock);
 	return rc;
 }
+#ifdef CONFIG_ZTEMT_BREATH_LEDS
+
+#define LPG_LUT_COUNT_MAX	47
+#define LPG_LUT_COUNT_DFT   41
+enum blink_mode{    
+	AW_SW_RESET = 0,	    // 0  soft_reset , all regs revert to default value.    
+	AW_CONST_ON,	    // 1 work on a constant lightness.    
+	AW_CONST_OFF,	    // 2 darkness is comming    
+	AW_AUTO_BREATH, 	// 3 self breathing, used in sences such as missing message.    
+	AW_STEP_FADE_IN,	// 4  fade in means that the lightness is getting stronger.    
+	AW_STEP_FADE_OUT,	// 5  fade out means that the lightness is getting weaker    
+	AW_BREATH_ONCE,     // 6 only breath once, touch the home menu for instance.
+};
+typedef struct{
+	u32 breath_mode;
+	u32 fade_time;
+	u32 fullon_time;
+	u32 fulloff_time;
+	u32 min_grade;
+	u32 max_grade;
+	u32 red_green_blue;
+	u32 red_magic_mode;
+}ST_BREATH_FEATURE;
+
+u64 back_duty_pattern[LPG_LUT_COUNT_MAX+1] = {0};	//for reback the duty pattern status
+struct pwm_output_pattern back_output_pattern = {
+	.cycles_per_duty = 0,
+	.num_entries = 0,
+	.duty_pattern = back_duty_pattern,
+};	//for reback the pwm pattern status
+
+static int nubia_light_breath_set(struct led_classdev *led_cdev, ST_BREATH_FEATURE breath_param)
+{
+	int rc=0;
+	int i = 0;
+	bool breath;
+	u64 step_ms;
+	u64 tmp, tmp1, last_pattern;
+	u64 max_duty, min_duty;
+	u8 step_n, step_dst;
+	u8 step_fade, step_fullon, step_fulloff;
+	u64 duty_pattern[LPG_LUT_COUNT_MAX+1] = {0};
+	struct pwm_output_pattern output_pattern;
+	struct qpnp_led_dev *led =
+		container_of(led_cdev, struct qpnp_led_dev, cdev);
+
+	breath = true;
+
+	mutex_lock(&led->lock);
+	if (led->breathing == true)
+		goto unlock;
+
+	led->led_setting.blink = false;
+	led->led_setting.breath = breath;
+	led->led_setting.brightness = breath ? LED_FULL : LED_OFF;
+
+	led->pwm_setting.duty_ns = led->pwm_setting.pre_period_ns;
+	led->pwm_setting.period_ns = led->pwm_setting.pre_period_ns;
+
+	/*calculate the step_n for every stage and step_ms*/
+	step_ms = (breath_param.fade_time*2 + breath_param.fullon_time + \
+				breath_param.fulloff_time)/LPG_LUT_COUNT_DFT;
+	step_fade = breath_param.fade_time/step_ms;
+	if(breath_param.fade_time<step_ms && breath_param.fade_time!=0)
+		step_fade = 1;
+	step_fullon = breath_param.fullon_time/step_ms;
+	if(breath_param.fullon_time<step_ms && breath_param.fullon_time!=0)
+		step_fullon = 1;
+	step_fulloff = breath_param.fulloff_time/step_ms;
+	if(breath_param.fulloff_time<step_ms && breath_param.fulloff_time!=0)
+		step_fulloff = 1;
+	step_n = step_fade*2 + step_fullon + step_fulloff;
+	if(step_n > LPG_LUT_COUNT_DFT)
+		step_n = LPG_LUT_COUNT_DFT;
+
+	max_duty = breath_param.max_grade*100/LED_FULL;
+	if(max_duty<1 && breath_param.max_grade!=0)
+		max_duty = 1;
+	min_duty = breath_param.min_grade*100/LED_FULL;
+	step_dst = (max_duty-min_duty)/step_fade;
+	if(step_dst<1 && breath_param.max_grade!=breath_param.min_grade && breath_param.max_grade!=0)
+		step_dst = 1;
+
+	LED_DEBUG("out_pattern_info:step_ms=%d step_n=%d step_fade=%d step_fullon=%d step_fulloff=%d\n", \
+		step_ms, step_n, step_fade, step_fullon, step_fulloff);
+
+	/*init the output patterns*/
+	tmp = led->pwm_setting.period_ns/100;
+	for(i=0; i<step_n; i++)
+	{
+		if(i<step_fade){	//grade pattern init
+			duty_pattern[i] = (min_duty + i*step_dst)*tmp;
+			last_pattern = duty_pattern[i];
+		}else if(i>=step_fade && i<(step_fade+step_fullon)){	//fullon pattern init
+			duty_pattern[i] = max_duty*tmp;
+			if(duty_pattern[i] < last_pattern)
+				duty_pattern[i] = last_pattern;
+		}else if(i>=(step_fade+step_fullon) && i<(step_fade*2+step_fullon)){	//fade pattern init
+			tmp1 = (i-step_fade-step_fullon)*step_dst*tmp;
+			if(last_pattern < tmp1)
+				duty_pattern[i] = 0;
+			else
+				duty_pattern[i] = last_pattern - tmp1;
+		}else if(i>=(step_fade*2+step_fullon)){	//fulloff pattern init
+			duty_pattern[i] = 0;
+		}
+		LED_DEBUG("out_pattern_%d_%d:%ld\n", step_n, i, duty_pattern[i]);
+	}
+	output_pattern.duty_pattern = duty_pattern;
+	output_pattern.num_entries = step_n;
+	output_pattern.cycles_per_duty = step_ms;
+	if(breath_param.breath_mode == AW_AUTO_BREATH)	//the pattern length + 1 byte for cotrol the repeat funtion
+		duty_pattern[step_n] = 1;
+	if(breath_param.breath_mode == AW_BREATH_ONCE)
+		duty_pattern[step_n] = 0;
+
+	/*set the output patterns*/
+	if(output_pattern.num_entries!=0)
+		led->pwm_dev->chip->ops->set_output_pattern(led->pwm_dev->chip, led->pwm_dev, &output_pattern);	//set output pattern
+
+	/*backup the src output patterns*/
+	if(back_output_pattern.num_entries==0 && output_pattern.num_entries!=0)	//store the src pattern infomation
+	{
+		back_output_pattern.cycles_per_duty = output_pattern.cycles_per_duty;
+		back_output_pattern.num_entries = output_pattern.num_entries;
+		memcpy(back_output_pattern.duty_pattern, output_pattern.duty_pattern, output_pattern.num_entries*sizeof(u64));
+	}
+
+	rc = __tri_led_set(led);
+	if (rc < 0) {
+		dev_err(led->chip->dev, "__tri_led_set %s failed, rc=%d\n",
+				led->cdev.name, rc);
+	}
+
+unlock:
+	mutex_unlock(&led->lock);
+	return rc;
+}
+static ST_BREATH_FEATURE breath_param;
+
+static ssize_t breath_feature_show(struct device *dev, struct device_attribute *attr,
+						char *buf)
+{
+	return snprintf(buf, PAGE_SIZE, "%d\n", breath_param.red_magic_mode);
+}
+
+
+static ssize_t breath_feature_store(struct device *dev, struct device_attribute *attr,
+						const char *buf, size_t count)
+{
+	int rc=0;
+	char *after, *parm2,*parm3, *parm4, *parm5, *parm6, *parm7;
+	//ST_BREATH_FEATURE breath_param;
+	struct led_classdev *led_cdev = dev_get_drvdata(dev);
+	struct qpnp_led_dev *led =
+		container_of(led_cdev, struct qpnp_led_dev, cdev);
+
+	breath_param.breath_mode = (int)simple_strtoul(buf, &after, 10);
+	while(isspace(*after))
+		after++;
+	parm2 = after;
+	breath_param.fade_time = (int)simple_strtoul(parm2, &after, 10);
+	while(isspace(*after))
+		after++;
+	parm3 = after;
+	breath_param.fullon_time = (int)simple_strtoul(parm3, &after, 10);
+	while(isspace(*after))
+		after++;
+	parm4 = after;
+	breath_param.fulloff_time = (int)simple_strtoul(parm4, &after, 10);
+	while(isspace(*after))
+		after++;
+	parm5 = after;
+	breath_param.min_grade= (int)simple_strtoul(parm5, &after, 10);
+	while(isspace(*after))
+		after++;
+	parm6 = after;
+	breath_param.max_grade = (int)simple_strtoul(parm6, &after, 10);
+	while(isspace(*after))
+		after++;
+	parm7 = after;
+	breath_param.red_green_blue = (int)simple_strtoul(parm7, &after, 10);
+
+	if (3 == breath_param.red_green_blue)
+		breath_param.red_magic_mode = breath_param.breath_mode;
+
+	LED_DEBUG("breath_mode=%d, fade_time=%d fullon_time=%d fulloff_time=%d min_grade=%d max_grade=%d Light = %d\n", \
+		breath_param.breath_mode, breath_param.fade_time, breath_param.fullon_time, \
+		breath_param.fulloff_time, breath_param.min_grade, breath_param.max_grade, breath_param.red_green_blue);
+
+	switch(breath_param.breath_mode)
+	{
+		case AW_SW_RESET:
+		case AW_CONST_OFF:
+			rc = qpnp_tri_led_set_brightness(led_cdev, LED_OFF);
+			break;
+		case AW_CONST_ON:
+			rc = qpnp_tri_led_set_brightness(led_cdev, LED_FULL);
+			break;
+		case AW_AUTO_BREATH:
+		case AW_BREATH_ONCE:
+			rc = nubia_light_breath_set(led_cdev, breath_param);
+			break;
+		default:
+			rc = -1;
+			dev_err(led->chip->dev, "unsupport breath_mode=%d\n", breath_param.breath_mode);
+			break;
+	}
+
+	if (rc < 0)
+		dev_err(led->chip->dev, "Set breath feature for %s fail, rc=%d\n",
+				led->label, rc);
+	if (led->led_setting.blink) {
+		led->cdev.brightness = LED_FULL;
+		led->blinking = true;
+		led->breathing = false;
+	} else if (led->led_setting.breath) {
+		led->cdev.brightness = LED_FULL;
+		led->blinking = false;
+		led->breathing = true;
+	} else {
+		led->cdev.brightness = led->led_setting.brightness;
+		led->blinking = false;
+		led->breathing = false;
+	}
+
+	return (rc < 0) ? rc : count;
+}
+static DEVICE_ATTR(breath_feature, 0644, breath_feature_show, breath_feature_store);
+static const struct attribute *breath_feature_attrs[] = {
+	&dev_attr_breath_feature.attr,
+	NULL
+};
+
+#endif
 
 static ssize_t breath_show(struct device *dev, struct device_attribute *attr,
 							char *buf)
@@ -377,6 +628,13 @@ static ssize_t breath_store(struct device *dev, struct device_attribute *attr,
 	if (led->breathing == breath)
 		goto unlock;
 
+#ifdef CONFIG_ZTEMT_BREATH_LEDS
+	if(back_output_pattern.num_entries != 0)
+	{
+		back_output_pattern.duty_pattern[back_output_pattern.num_entries] = 1;	//default for repeat
+		led->pwm_dev->chip->ops->set_output_pattern(led->pwm_dev->chip, led->pwm_dev, &back_output_pattern);	//set output pattern
+	}
+#endif
 	led->led_setting.blink = false;
 	led->led_setting.breath = breath;
 	led->led_setting.brightness = breath ? LED_FULL : LED_OFF;
@@ -429,6 +687,15 @@ static int qpnp_tri_led_register(struct qpnp_tri_led_chip *chip)
 						led->label, rc);
 				goto err_out;
 			}
+#ifdef CONFIG_ZTEMT_BREATH_LEDS
+			rc = sysfs_create_files(&led->cdev.dev->kobj,
+					breath_feature_attrs);
+			if (rc < 0) {
+				dev_err(chip->dev, "Create breath feature file for %s led failed, rc=%d\n",
+						led->label, rc);
+				goto err_out;
+			}
+#endif
 		}
 	}
 

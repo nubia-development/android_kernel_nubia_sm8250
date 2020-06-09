@@ -19,7 +19,7 @@
 #include <asm/unaligned.h>
 
 #include "u_os_desc.h"
-
+#include "../dwc3/nubia_usb_test.h"
 /**
  * struct usb_os_string - represents OS String to be reported by a gadget
  * @bLength: total length of the entire descritor, always 0x12
@@ -879,7 +879,7 @@ static int set_config(struct usb_composite_dev *cdev,
 	int			result = -EINVAL;
 	unsigned		power = gadget_is_otg(gadget) ? 8 : 100;
 	int			tmp;
-
+	nubia_set_usbhost_ctrl(gadget);
 	if (number) {
 		list_for_each_entry(c, &cdev->configs, list) {
 			if (c->bConfigurationValue == number) {

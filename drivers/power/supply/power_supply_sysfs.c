@@ -325,6 +325,15 @@ static struct device_attribute power_supply_attrs[] = {
 	POWER_SUPPLY_ATTR(energy_now),
 	POWER_SUPPLY_ATTR(energy_avg),
 	POWER_SUPPLY_ATTR(capacity),
+	#if defined(CONFIG_NUBIA_MSOC_FEATURE)
+	POWER_SUPPLY_ATTR(capacity_msoc),
+	#endif
+	#if defined(CONFIG_NUBIA_CHARGE_FEATURE)
+	POWER_SUPPLY_ATTR(lcd_on),
+	#endif
+	#if defined(CONFIG_USBPD_PHY_QCOM)
+	POWER_SUPPLY_ATTR(nubia_fast_charge),
+	#endif
 	POWER_SUPPLY_ATTR(capacity_alert_min),
 	POWER_SUPPLY_ATTR(capacity_alert_max),
 	POWER_SUPPLY_ATTR(capacity_level),

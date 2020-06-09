@@ -210,7 +210,6 @@ static ssize_t brightness_store(struct device *dev,
 				bd->thermal_brightness_limit;
 
 	rc = backlight_device_set_brightness(bd, brightness);
-
 	return rc ? rc : count;
 }
 static DEVICE_ATTR_RW(brightness);

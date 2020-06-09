@@ -52,3 +52,6 @@ obj-$(CONFIG_USB_DWC3_OF_SIMPLE)	+= dwc3-of-simple.o
 obj-$(CONFIG_USB_DWC3_ST)		+= dwc3-st.o
 obj-$(CONFIG_USB_DWC3_QCOM)		+= dwc3-qcom.o
 obj-$(CONFIG_USB_DWC3_MSM)		+= dwc3-msm.o dbm.o
+
+obj-$(CONFIG_USB_DWC3)		+= nubia_usb_test.o
+

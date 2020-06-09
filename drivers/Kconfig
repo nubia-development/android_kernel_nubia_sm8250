@@ -23,6 +23,8 @@ source "drivers/block/Kconfig"
 
 source "drivers/nvme/Kconfig"
 
+source "drivers/fan/Kconfig"
+
 # misc before ide - BLK_DEV_SGIIOC4 depends on SGI_IOC4
 
 source "drivers/misc/Kconfig"
@@ -224,10 +226,11 @@ source "drivers/siox/Kconfig"
 source "drivers/slimbus/Kconfig"
 
 source "drivers/esoc/Kconfig"
-
+source "drivers/nubia/Kconfig"
 source "drivers/sensors/Kconfig"
 
 source "drivers/gpu/msm/Kconfig"
 
 source "drivers/energy_model/Kconfig"
+source "drivers/nubia_hw_version/Kconfig"
 endmenu

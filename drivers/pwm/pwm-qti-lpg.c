@@ -1106,6 +1106,12 @@ static int qpnp_lpg_pwm_set_output_pattern(struct pwm_chip *pwm_chip,
 	u64 period_ns, duty_ns, tmp;
 	u32 *percentages;
 	int rc = 0, i;
+#ifdef CONFIG_ZTEMT_BREATH_LEDS
+	static u8 back_flg = 0;
+	u32 pattern_back[LPG_LUT_COUNT_MAX]={0};
+    struct lpg_ramp_config ramp_config_back;
+#endif
+
 
 	lpg = pwm_dev_to_qpnp_lpg(pwm_chip, pwm);
 	if (lpg == NULL) {
@@ -1138,6 +1144,18 @@ static int qpnp_lpg_pwm_set_output_pattern(struct pwm_chip *pwm_chip,
 		percentages[i] = (u32)div64_u64(tmp, period_ns);
 	}
 
+#ifdef CONFIG_ZTEMT_BREATH_LEDS
+		if(!back_flg)
+		{
+			printk(KERN_DEBUG "pwm lup backup the src ramp_config\n");
+			memcpy(&ramp_config_back, &lpg->ramp_config, sizeof(struct lpg_ramp_config));
+			memcpy(pattern_back, lpg->ramp_config.pattern, lpg->ramp_config.pattern_length*sizeof(u32));
+			ramp_config_back.pattern = pattern_back;
+		}
+		lpg->ramp_config.pattern_repeat = !!output_pattern->duty_pattern[output_pattern->num_entries];	//set repeate
+		printk(KERN_DEBUG "repeate_feature=%d\n", lpg->ramp_config.pattern_repeat);
+#endif
+
 	rc = qpnp_lpg_set_lut_pattern(lpg, percentages,
 			output_pattern->num_entries);
 	if (rc < 0) {
@@ -1160,6 +1178,20 @@ static int qpnp_lpg_pwm_set_output_pattern(struct pwm_chip *pwm_chip,
 	if (rc < 0)
 		dev_err(pwm_chip->dev, "Config LPG%d ramping failed, rc=%d\n",
 				lpg->lpg_idx, rc);
+#ifdef CONFIG_ZTEMT_BREATH_LEDS
+	if(!back_flg)
+	{
+		printk(KERN_DEBUG "pwm lup copy the src ramp_config to out parameter.\n");
+		output_pattern->num_entries = ramp_config_back.pattern_length;
+		output_pattern->cycles_per_duty = ramp_config_back.step_ms;
+		for(i=0; i<output_pattern->num_entries; i++)
+		{
+			output_pattern->duty_pattern[i] = ramp_config_back.pattern[i]*period_ns/100;
+		}
+		back_flg = 1;
+	}
+#endif
+
 err:
 	kfree(percentages);
 

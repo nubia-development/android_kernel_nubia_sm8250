@@ -28,4 +28,10 @@ config QPNP_USB_PDPHY
 	  The is used to handle the PHY layer communication of the
 	  Power Delivery stack.
 
+config USBPD_PHY_QCOM
+	bool "Qualcomm USBPD PHY"
+	default y
+	help
+	  Say Y here to enable QCOM USBPD API function for PD message.
+
 endmenu

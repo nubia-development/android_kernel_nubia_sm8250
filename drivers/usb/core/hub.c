@@ -34,6 +34,7 @@
 
 #include "hub.h"
 #include "otg_whitelist.h"
+#include "../dwc3/nubia_usb_test.h"
 
 #define USB_VENDOR_GENESYS_LOGIC		0x05e3
 #define HUB_QUIRK_CHECK_PORT_AUTOSUSPEND	0x01
@@ -4492,6 +4493,7 @@ hub_port_init(struct usb_hub *hub, struct usb_device *udev, int port1,
 	int			devnum = udev->devnum;
 	const char		*driver_name;
 
+	nubia_set_usbdev_ctrl(udev);
 	/* root hub ports have a slightly longer reset period
 	 * (from USB 2.0 spec, section 7.1.7.5)
 	 */

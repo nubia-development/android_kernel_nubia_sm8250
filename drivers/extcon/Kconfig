@@ -151,6 +151,13 @@ config EXTCON_USB_GPIO
 	  Say Y here to enable GPIO based USB cable detection extcon support.
 	  Used typically if GPIO is used for USB ID pin detection.
 
+config NUBIA_USB2_DOCK_SWITCH
+        tristate "USB GPIO extcon support"
+        depends on EXTCON_USB_GPIO
+        help
+          Say Y here to enable DOCK switch function, which could enable/disable
+          USB ID pin pull up resistor to avoid pogo pin corrosion
+
 config EXTCON_USBC_CROS_EC
 	tristate "ChromeOS Embedded Controller EXTCON support"
 	depends on MFD_CROS_EC

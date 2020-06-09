@@ -77,4 +77,14 @@ config HL6111R
 	  sizes. The HL6111R has voltage, current and temperature
 	  protection mechanisms, an I2C interface, and a PSNS output.
 
+config NUBIA_CHARGE_FEATURE
+	bool "nubia charge feature support"
+	help
+	  Say Y here to enable nubia charge feature support.
+	  
+config NUBIA_MSOC_FEATURE
+	bool "nubia msoc feature support"
+	help
+	  Say Y here to enable nubia msoc feature support.
+	  
 endmenu

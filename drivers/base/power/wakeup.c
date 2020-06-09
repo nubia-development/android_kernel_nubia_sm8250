@@ -39,7 +39,11 @@ unsigned int pm_wakeup_irq __read_mostly;
 
 /* If greater than 0 and the system is suspending, terminate the suspend. */
 static atomic_t pm_abort_suspend __read_mostly;
-
+//Begin [0016004715 add the kernel power code,20180316]
+#ifdef CONFIG_ZTEMT_POWER_DEBUG
+extern bool wakeup_wake_lock_debug;
+#endif
+//End [0016004715 add the kernel power code,20180316]
 /*
  * Combined counters of registered wakeup events and wakeup events in progress.
  * They need to be modified together atomically, so it's better to use one
@@ -560,7 +564,14 @@ static void wakeup_source_report_event(struct wakeup_source *ws, bool hard)
 	/* This is racy, but the counter is approximate anyway. */
 	if (events_check_enabled)
 		ws->wakeup_count++;
-
+//Begin [0016004715 add the kernel power code,20180316]
+	#ifdef CONFIG_ZTEMT_POWER_DEBUG
+	if (wakeup_wake_lock_debug){
+	    wakeup_wake_lock_debug = false;
+	    printk("First wakeup lock:%s\n", ws->name);
+	}
+	#endif //CONFIG_ZTEMT_POWER_DEBUG
+//End  [0016004715 add the kernel power code,20180316]
 	if (!ws->active)
 		wakeup_source_activate(ws);
 
@@ -1034,7 +1045,32 @@ void pm_wakep_autosleep_enabled(bool set)
 #endif /* CONFIG_PM_AUTOSLEEP */
 
 static struct dentry *wakeup_sources_stats_dentry;
+//Begin [0016004715 add the kernel power code,20180316]
+#ifdef CONFIG_ZTEMT_POWER_DEBUG
+void global_print_active_locks_debug(struct wakeup_source *ws)
+{
+	unsigned long flags;
 
+	spin_lock_irqsave(&ws->lock, flags);
+
+	if (ws->active) {
+		printk("active wake lock : %s,active_count:%lu,total_time:%lld,max_time:%lld\n", ws->name,ws->active_count,ktime_to_ms(ws->total_time),ktime_to_ms(ws->max_time));
+	}
+	spin_unlock_irqrestore(&ws->lock, flags);
+}
+
+void global_print_active_locks(void *unused)
+{
+	struct wakeup_source *ws;
+	int srcuidx;
+	srcuidx = srcu_read_lock(&wakeup_srcu);
+	list_for_each_entry_rcu(ws, &wakeup_sources, entry)
+		global_print_active_locks_debug(ws);
+	srcu_read_unlock(&wakeup_srcu, srcuidx);
+
+}
+#endif //CONFIG_ZTEMT_POWER_DEBUG
+//End [0016004715 add the kernel power code,20180316]
 /**
  * print_wakeup_source_stats - Print wakeup source statistics information.
  * @m: seq_file to print the statistics into.

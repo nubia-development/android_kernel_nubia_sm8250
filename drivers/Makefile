@@ -192,3 +192,6 @@ obj-$(CONFIG_UNISYS_VISORBUS)	+= visorbus/
 obj-$(CONFIG_SIOX)		+= siox/
 obj-$(CONFIG_GNSS)		+= gnss/
 obj-$(CONFIG_SENSORS_SSC)	+= sensors/
+obj-$(CONFIG_NUBIA_DRIVERS)	+= nubia/
+obj-$(CONFIG_FAN)	+= fan/
+obj-$(CONFIG_NUBIA_HW_VERSION)	+= nubia_hw_version/

@@ -459,6 +459,15 @@ int vote(struct votable *votable, const char *client_str, bool enabled, int val)
 	pr_debug("%s: %s,%d voting %s of val=%d\n",
 		votable->name,
 		client_str, client_id, enabled ? "on" : "off", val);
+
+#if defined(CONFIG_NUBIA_CHARGE_FEATURE)
+	if (votable->name && ((strcmp(votable->name, "USB_ICL") == 0)||(strcmp(votable->name, "FCC") == 0) || (strcmp(votable->name, "CHG_DISABLE") == 0) || (strcmp(votable->name, "FV") == 0)) ){
+		pr_err("%s: %s,%d voting %s of val=%d\n",
+		votable->name,
+		client_str, client_id, enabled ? "on" : "off", val);
+	}
+#endif
+
 	switch (votable->type) {
 	case VOTE_MIN:
 		vote_min(votable, client_id, &effective_result, &effective_id);

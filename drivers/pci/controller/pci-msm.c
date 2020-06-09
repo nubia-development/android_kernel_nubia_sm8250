@@ -1110,7 +1110,7 @@ static void pcie_phy_dump(struct msm_pcie_dev_t *dev)
 
 	size = resource_size(dev->res[MSM_PCIE_RES_PHY].resource);
 	for (i = 0; i < size; i += 32) {
-		PCIE_DUMP(dev,
+		PCIE_ERR(dev,
 			"PCIe PHY of RC%d: 0x%04x %08x %08x %08x %08x %08x %08x %08x %08x\n",
 			dev->rc_idx, i,
 			readl_relaxed(dev->phy + i),
@@ -1247,13 +1247,13 @@ static void pcie_parf_dump(struct msm_pcie_dev_t *dev)
 	int i, size;
 	u32 original;
 
-	PCIE_DUMP(dev, "PCIe: RC%d PARF testbus\n", dev->rc_idx);
+	PCIE_ERR(dev, "PCIe: RC%d PARF testbus\n", dev->rc_idx);
 
 	original = readl_relaxed(dev->parf + PCIE20_PARF_SYS_CTRL);
 	for (i = 1; i <= 0x1A; i++) {
 		msm_pcie_write_mask(dev->parf + PCIE20_PARF_SYS_CTRL,
 				0xFF0000, i << 16);
-		PCIE_DUMP(dev,
+		PCIE_ERR(dev,
 			"RC%d: PARF_SYS_CTRL: 0%08x PARF_TEST_BUS: 0%08x\n",
 			dev->rc_idx,
 			readl_relaxed(dev->parf + PCIE20_PARF_SYS_CTRL),
@@ -1261,11 +1261,11 @@ static void pcie_parf_dump(struct msm_pcie_dev_t *dev)
 	}
 	writel_relaxed(original, dev->parf + PCIE20_PARF_SYS_CTRL);
 
-	PCIE_DUMP(dev, "PCIe: RC%d PARF register dump\n", dev->rc_idx);
+	PCIE_ERR(dev, "PCIe: RC%d PARF register dump\n", dev->rc_idx);
 
 	size = resource_size(dev->res[MSM_PCIE_RES_PARF].resource);
 	for (i = 0; i < size; i += 32) {
-		PCIE_DUMP(dev,
+		PCIE_ERR(dev,
 			"RC%d: 0x%04x %08x %08x %08x %08x %08x %08x %08x %08x\n",
 			dev->rc_idx, i,
 			readl_relaxed(dev->parf + i),
@@ -4097,7 +4097,7 @@ static int msm_pcie_link_train(struct msm_pcie_dev_t *dev)
 	do {
 		usleep_range(LINK_UP_TIMEOUT_US_MIN, LINK_UP_TIMEOUT_US_MAX);
 		val =  readl_relaxed(dev->elbi + PCIE20_ELBI_SYS_STTS);
-		PCIE_DBG(dev, "PCIe RC%d: LTSSM_STATE: %s\n",
+		PCIE_ERR(dev, "PCIe RC%d: LTSSM_STATE: %s\n",
 			dev->rc_idx, TO_LTSSM_STR((val >> 12) & 0x3f));
 	} while ((!(val & XMLH_LINK_UP) ||
 		!msm_pcie_confirm_linkup(dev, false, false, NULL))
@@ -4115,6 +4115,8 @@ static int msm_pcie_link_train(struct msm_pcie_dev_t *dev)
 			dev->gpio[MSM_PCIE_GPIO_PERST].on);
 		PCIE_ERR(dev, "PCIe RC%d link initialization failed\n",
 			dev->rc_idx);
+		pcie_phy_dump(dev);
+		pcie_parf_dump(dev);
 		return MSM_PCIE_ERROR;
 	}
 
@@ -4630,6 +4632,8 @@ int msm_pcie_enumerate(u32 rc_idx)
 	ret = msm_pcie_enable(dev);
 	if (ret) {
 		PCIE_ERR(dev, "PCIe: RC%d: failed to enable\n", dev->rc_idx);
+		pcie_phy_dump(dev);
+		pcie_parf_dump(dev);
 		goto out;
 	}
 
@@ -5061,6 +5065,8 @@ static irqreturn_t handle_linkdown_irq(int irq, void *data)
 		} else {
 			msm_pcie_notify_client(dev, MSM_PCIE_EVENT_LINKDOWN);
 		}
+		pcie_phy_dump(dev);
+		pcie_parf_dump(dev);
 	}
 
 	return IRQ_HANDLED;

@@ -349,6 +349,14 @@ static void *usbpd_ipc_log;
 
 #define PD_MIN_SINK_CURRENT	900
 
+#ifdef CONFIG_USBPD_PHY_QCOM
+#define USB_VID_NUBIA 0x2C40
+#define USB_VDM_NUBIA 0x2d36
+#define PCA9468_FLOAT_VOLTAGE 4400000  	   //4.4V
+#define PCA9468_TA_CHARGE_CURRENT_4A 4000000  //4A 
+#define PCA9468_TA_CHARGE_CURRENT_5A 5000000  //5A 
+#endif
+
 static const u32 default_src_caps[] = { 0x36019096 };	/* VSafe5V @ 1.5A */
 static const u32 default_snk_caps[] = { 0x2601912C };	/* VSafe5V @ 3A */
 
@@ -402,6 +410,14 @@ struct usbpd {
 	bool			peer_usb_comm;
 	bool			peer_pr_swap;
 	bool			peer_dr_swap;
+	
+#ifdef CONFIG_USBPD_PHY_QCOM
+	int 		vendor_id;
+	int 		vendor_vdm;
+	bool		pd_apdo_connected;	/* Power Delivery with APDO */
+	bool		pd_start_direct_charging; /* flag for Start Direct Charging */
+	bool		pd_start_qc4_charging; /* flag for Start QC4 Charging */
+#endif
 
 	u32			sink_caps[7];
 	int			num_sink_caps;
@@ -1377,6 +1393,183 @@ int usbpd_send_svdm(struct usbpd *pd, u16 svid, u8 cmd,
 	return usbpd_send_vdm(pd, svdm_hdr, vdos, num_vdos);
 }
 EXPORT_SYMBOL(usbpd_send_svdm);
+#ifdef CONFIG_USBPD_PHY_QCOM
+int usbpd_get_apdo_max_power(struct usbpd *pd, u32 *pdo_pos, u32 *max_uv, u32 *max_ua, u32 *max_pwr)
+{
+	int i, max_current, max_voltage, max_power;
+	int max_mv;
+	u8 type;
+	u32 pdo;
+	int ret = 0;
+
+	/* Save max_uv */
+	/* max_uv is the desired maximum voltage */
+	/* Return the new max_uv, max_ua, and max_pwr */
+	max_mv = *max_uv/1000;
+	
+	/* First, get TA maximum power from the fixed PDO */
+	for (i = 0; i < ARRAY_SIZE(pd->received_pdos); i++) {
+		pdo = pd->received_pdos[i];
+		type = PD_SRC_PDO_TYPE(pdo);
+		if (type == PD_SRC_PDO_TYPE_FIXED) {
+			max_voltage = PD_SRC_PDO_FIXED_VOLTAGE(pdo)*50;		/* mV */
+			max_current = PD_SRC_PDO_FIXED_MAX_CURR(pdo)*10;	/* mA */
+			if((max_voltage != 0)&&(max_current != 0)){
+				max_power = max_voltage*max_current;	/* uW */
+				*max_pwr = max_power;	/* uW */
+			}
+		}
+	}
+	if (*pdo_pos == 0) {
+		/* Get the TA maximum current and voltage of APDO */
+		for (i = 0; i < ARRAY_SIZE(pd->received_pdos); i++) {
+			pdo = pd->received_pdos[i];
+			type = PD_SRC_PDO_TYPE(pdo);
+			if (type == PD_SRC_PDO_TYPE_AUGMENTED) {
+				max_current = PD_APDO_MAX_CURR(pdo)*50;		/* mA */
+				max_voltage = PD_APDO_MAX_VOLT(pdo)*100;	/* mV */
+				
+				/* For Nubia */
+				if (pd->vendor_id == USB_VID_NUBIA) {
+					/* Get the maxpower from APDO */
+					max_power = max_voltage*max_current;	/* uW */
+					*max_pwr = max_power;	/* uW */
+				}
+				
+				if (max_voltage > max_mv) {
+					*max_uv = max_voltage*1000;	/* uV */
+					*max_ua = max_current*1000;	/* uA */
+					*pdo_pos = i + 1;
+					break;
+				}
+			}
+		}
+		if (*pdo_pos == 0) {
+			usbpd_err(&pd->dev, "max_uv (%d) and max_ua (%d) out of range of APDO\n",
+			*max_uv, *max_ua);
+			ret = -EINVAL;
+		}		
+	} else {
+		/* If we already have pdo object position, we don't need to search max current/voltage */
+		ret = -ENOTSUPP;
+	}
+
+	return ret;
+}
+EXPORT_SYMBOL(usbpd_get_apdo_max_power);
+static int pd_select_apdo(struct usbpd *pd, int pdo_pos, int uv, int ua)
+{
+	int i;
+	int curr, obj_pos;
+	int max_current, max_voltage;
+	bool mismatch = false;
+	u8 type;
+	u32 pdo;
+
+	if (pdo_pos == 0) {
+		/* Get the proper PDO */
+		for (i = 0; i < ARRAY_SIZE(pd->received_pdos); i++) {
+			pdo = pd->received_pdos[i];
+			type = PD_SRC_PDO_TYPE(pdo);
+			if (type == PD_SRC_PDO_TYPE_AUGMENTED) {
+				max_voltage = PD_APDO_MAX_VOLT(pdo);
+				if (max_voltage*100000 >= uv) {
+					obj_pos = i + 1;
+					pd->requested_voltage = uv;
+					max_current = PD_APDO_MAX_CURR(pdo);
+					if (ua > max_current*50000) {
+						ua = max_current*50000;
+					}
+					curr = ua / 1000;
+					pd->rdo = PD_RDO_AUGMENTED(obj_pos, mismatch, 1, 1,
+					uv / 20000, ua / 50000);
+					break;
+				}
+				else
+					obj_pos = 0;
+			}
+		}
+
+		if (obj_pos == 0) {
+			usbpd_err(&pd->dev, "uv (%d) and ua (%d) out of range of APDO\n",
+			uv, ua);
+			return -EINVAL;
+		}
+
+		/* Can't sink more than 5V if VCONN is sourced from the VBUS input */
+
+		//if (pd->vconn_enabled && !pd->vconn_is_external && pd->requested_voltage > 5000000)
+		if (pd->vconn_enabled && pd->requested_voltage > 5000000)
+			return -ENOTSUPP;
+
+		pd->requested_current = curr;
+		pd->requested_pdo = obj_pos;
+	}
+	else {
+		return pd_select_pdo(pd, pdo_pos, uv, ua);
+	}
+
+	return 0;
+}
+
+static inline const char *src_current(enum power_supply_typec_mode typec_mode);
+int usbpd_request_pdo(struct usbpd *pd, u32 pdo, u32 uv, u32 ua)
+{
+	int ret;
+
+	mutex_lock(&pd->swap_lock);
+
+	/* Only allowed if we are already in explicit sink contract */
+	if (pd->current_state != PE_SNK_READY || 
+	    (pd->spec_rev == USBPD_REV_30 && 
+	     pd->typec_mode != POWER_SUPPLY_TYPEC_SOURCE_HIGH && pd->typec_mode != POWER_SUPPLY_TYPEC_SOURCE_MEDIUM)) {
+		usbpd_err(&pd->dev, "select_pdo: Cannot select new PDO yet\n");
+		ret = -EBUSY;
+		goto out;
+	}
+
+	if (pdo > 7) {
+		usbpd_err(&pd->dev, "select_pdo: invalid PDO:%d\n", pdo);
+		ret = -EINVAL;
+		goto out;
+	}
+
+	ret = pd_select_apdo(pd, (int)pdo, (int)uv, (int)ua);
+	if (ret)
+		goto out;
+
+	reinit_completion(&pd->is_ready);
+	pd->send_request = true;
+	kick_sm(pd, 0);
+
+	/* wait for operation to complete */
+	if (!wait_for_completion_timeout(&pd->is_ready,
+			msecs_to_jiffies(2000))) {
+		usbpd_err(&pd->dev, "select_pdo: request timed out\n");
+		ret = -ETIMEDOUT;
+		goto out;
+	}
+
+	/* determine if request was accepted/rejected */
+	if (pd->selected_pdo != pd->requested_pdo ||
+			pd->current_voltage != pd->requested_voltage) {
+		usbpd_err(&pd->dev, "select_pdo: request rejected\n");
+		ret = -EINVAL;
+	}
+
+out:
+	if (pdo == 1) {
+		/* fixed pdo */
+		/* clear direct chargig flag */
+		pd->pd_start_direct_charging = false;
+	}
+	pd->send_request = false;
+	mutex_unlock(&pd->swap_lock);
+	pr_info("[PD]--%s\n", __func__);
+	return ret;
+}
+EXPORT_SYMBOL(usbpd_request_pdo);
+#endif
 
 void usbpd_vdm_in_suspend(struct usbpd *pd, bool in_suspend)
 {
@@ -1547,7 +1740,7 @@ static void handle_vdm_rx(struct usbpd *pd, struct rx_msg *rx_msg)
 		pd->has_dp = true;
 
 		/* Set to USB and DP cocurrency mode */
-		extcon_blocking_sync(pd->extcon, EXTCON_DISP_DP, 2);
+		extcon_blocking_sync(pd->extcon, EXTCON_DISP_DP, 4);
 	}
 
 	/* if it's a supported SVID, pass the message to the handler */
@@ -2644,6 +2837,29 @@ static void enter_state_snk_wait_for_capabilities(struct usbpd *pd)
 {
 	unsigned long flags;
 
+#ifdef CONFIG_USBPD_PHY_QCOM
+    union power_supply_propval val = {0};
+	struct power_supply *psy_dc;
+	/* When PD Hardreset happened or start PD at the first time */
+	/* Stop the direct charging */
+	pd->pd_apdo_connected = false;
+	if (pd->pd_start_direct_charging == true) {
+		usbpd_err(&pd->dev, "Stop PCA9468 charging\n");
+		/* Stop Direct Charging */
+		/* Get power supply name */
+		psy_dc = power_supply_get_by_name("pca9468-mains");
+		if (psy_dc == NULL){
+			usbpd_err(&pd->dev, "Error Get the direct charging psy\n");
+		}else {	
+			/* Set the enable direct charging */
+			val.intval = 0;
+			power_supply_set_property(psy_dc, POWER_SUPPLY_PROP_CHARGING_ENABLED, &val);
+			power_supply_set_property(psy_dc, POWER_SUPPLY_PROP_NUBIA_FAST_CHARGE, &val);
+		}
+	}
+	pd->pd_start_direct_charging = false;
+	pd->pd_start_qc4_charging = false;
+#endif
 	spin_lock_irqsave(&pd->rx_lock, flags);
 	if (list_empty(&pd->rx_q))
 		kick_sm(pd, SINK_WAIT_CAP_TIME);
@@ -2756,8 +2972,14 @@ static void handle_state_snk_select_capability(struct usbpd *pd,
 			int mv = max(pd->requested_voltage,
 					pd->current_voltage) / 1000;
 			val.intval = (2500000 / mv) * 1000;
+#ifdef CONFIG_USBPD_PHY_QCOM
+			if (pd->pd_start_direct_charging == false){
 			power_supply_set_property(pd->usb_psy,
 				POWER_SUPPLY_PROP_PD_CURRENT_MAX, &val);
+			}
+#else
+			power_supply_set_property(pd->usb_psy, POWER_SUPPLY_PROP_PD_CURRENT_MAX, &val);
+#endif
 		} else {
 			/* decreasing current? */
 			ret = power_supply_get_property(pd->usb_psy,
@@ -2766,9 +2988,15 @@ static void handle_state_snk_select_capability(struct usbpd *pd,
 				pd->requested_current < val.intval) {
 				val.intval =
 					pd->requested_current * 1000;
+#ifdef CONFIG_USBPD_PHY_QCOM
+				if (pd->pd_start_direct_charging == false){
 				power_supply_set_property(pd->usb_psy,
 				     POWER_SUPPLY_PROP_PD_CURRENT_MAX,
 				     &val);
+				}
+#else
+				power_supply_set_property(pd->usb_psy, POWER_SUPPLY_PROP_PD_CURRENT_MAX, &val);
+#endif
 			}
 		}
 
@@ -2810,9 +3038,14 @@ static void handle_state_snk_transition_sink(struct usbpd *pd,
 
 		/* resume charging */
 		val.intval = pd->requested_current * 1000; /* mA->uA */
+#ifdef CONFIG_USBPD_PHY_QCOM
+		if (pd->pd_start_direct_charging == false){
 		power_supply_set_property(pd->usb_psy,
 				POWER_SUPPLY_PROP_PD_CURRENT_MAX, &val);
-
+		}
+#else
+		power_supply_set_property(pd->usb_psy, POWER_SUPPLY_PROP_PD_CURRENT_MAX, &val);
+#endif
 		usbpd_set_state(pd, PE_SNK_READY);
 	} else {
 		/* timed out; go to hard reset */
@@ -2830,8 +3063,12 @@ static void enter_state_snk_ready(struct usbpd *pd)
 		usbpd_send_svdm(pd, USBPD_SID,
 				USBPD_SVDM_DISCOVER_IDENTITY,
 				SVDM_CMD_TYPE_INITIATOR, 0, NULL, 0);
-
+#ifdef CONFIG_USBPD_PHY_QCOM
+	if (pd->pd_start_qc4_charging == true)
+		kobject_uevent(&pd->dev.kobj, KOBJ_CHANGE);
+#else
 	kobject_uevent(&pd->dev.kobj, KOBJ_CHANGE);
+#endif
 	complete(&pd->is_ready);
 	typec_set_pwr_opmode(pd->typec_port, TYPEC_PWR_MODE_PD);
 }
@@ -2956,6 +3193,10 @@ static bool handle_data_snk_ready(struct usbpd *pd, struct rx_msg *rx_msg)
 
 static bool handle_ext_snk_ready(struct usbpd *pd, struct rx_msg *rx_msg)
 {
+#ifdef CONFIG_USBPD_PHY_QCOM
+	int i, index = 0;
+	u8 src_cap_ext_db_vdm[2]={0,0};
+#endif
 	switch (PD_MSG_HDR_TYPE(rx_msg->hdr)) {
 	case MSG_SOURCE_CAPABILITIES_EXTENDED:
 		if (rx_msg->data_len != PD_SRC_CAP_EXT_DB_LEN) {
@@ -2965,6 +3206,75 @@ static bool handle_ext_snk_ready(struct usbpd *pd, struct rx_msg *rx_msg)
 		memcpy(&pd->src_cap_ext_db, rx_msg->payload,
 			sizeof(pd->src_cap_ext_db));
 		complete(&pd->is_ready);
+#ifdef CONFIG_USBPD_PHY_QCOM
+		pd->vendor_id = pd->src_cap_ext_db[0] + pd->src_cap_ext_db[1]*256;
+		for (i = 0; i < PD_SRC_CAP_EXT_DB_LEN; i++){
+			if((i > 1)&&(pd->src_cap_ext_db[i] != 0x0000)){
+				if(index < 2){
+					src_cap_ext_db_vdm[index] = pd->src_cap_ext_db[i];					
+					index++;
+				}				
+			}			
+		}
+
+		pd->vendor_vdm = src_cap_ext_db_vdm[0] + src_cap_ext_db_vdm[1]*256;
+		pr_err("vendor_id = 0x%04x, pd->vendor_vdm = 0x%04x\n", pd->vendor_id, pd->vendor_vdm);
+
+		/* move the direct charging start point after checking VID */
+		// NUBIA BSP : For QC4 bug, move NXP code to here +++
+		if (pd->pd_apdo_connected == false) {
+			for (i = 0; i < 7; i++) {
+				u8 type;
+				u32 pdo = pd->received_pdos[i];
+				type = PD_SRC_PDO_TYPE(pdo);
+
+				if (type == PD_SRC_PDO_TYPE_AUGMENTED) {
+					usbpd_dbg(&pd->dev, "Detect Augmented PDO\n");
+					/* If PPS TA is connected, start the direct charging and prevent user space from controling TA */
+					pd->pd_apdo_connected = true;
+					break;
+				}
+			}
+		}
+		// NUBIA BSP : For QC4 bug, move NXP code to here ---
+		usbpd_dbg(&pd->dev, "Enter PE_SINK_READY, apo_connected=%d, start_direct_charging=%d\n", 
+		pd->pd_apdo_connected, pd->pd_start_direct_charging);
+		if ((pd->pd_apdo_connected == true) && (pd->pd_start_direct_charging == false)) {
+			struct power_supply *psy_dc;
+			union power_supply_propval val;
+			union power_supply_propval val_vdm;
+			union power_supply_propval val_voltage;
+			union power_supply_propval val_limit;			
+			usbpd_dbg(&pd->dev, "Start PCA9468 direct charging\n");
+			/* Start Direct Charging */
+			/* Get power supply name */
+			psy_dc = power_supply_get_by_name("pca9468-mains");
+			if (psy_dc == NULL) {
+				usbpd_err(&pd->dev, "Error Get the direct charging psy\n");
+			} else {
+			/* Set the enable direct charging */
+				val_voltage.intval = PCA9468_FLOAT_VOLTAGE;  	//4.4V				
+				val.intval = 1;
+				if(pd->vendor_vdm == USB_VDM_NUBIA){
+					val_vdm.intval = 1;
+					val_limit.intval   = PCA9468_TA_CHARGE_CURRENT_5A; //5A
+					power_supply_set_property(psy_dc, POWER_SUPPLY_PROP_NUBIA_FAST_CHARGE, &val_vdm);
+				}else{
+					val_vdm.intval = 0;
+					val_limit.intval   = PCA9468_TA_CHARGE_CURRENT_4A; //4A
+					power_supply_set_property(psy_dc, POWER_SUPPLY_PROP_NUBIA_FAST_CHARGE, &val_vdm);
+				}				
+				power_supply_set_property(psy_dc, POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT, &val_limit);
+				power_supply_set_property(psy_dc, POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE, &val_voltage);				
+				power_supply_set_property(psy_dc, POWER_SUPPLY_PROP_CHARGING_ENABLED, &val);
+				pd->pd_start_direct_charging = true;				
+			}
+		}else {
+			pd->pd_start_qc4_charging = true;
+			usbpd_info(&pd->dev, "Set for QC4 charging\n");
+		}
+		kobject_uevent(&pd->dev.kobj, KOBJ_CHANGE);
+#endif
 		break;
 	case MSG_PPS_STATUS:
 		if (rx_msg->data_len != sizeof(pd->pps_status_db)) {
@@ -3404,6 +3714,9 @@ static const struct usbpd_state_handler state_handlers[] = {
 static void handle_disconnect(struct usbpd *pd)
 {
 	union power_supply_propval val = {0};
+#ifdef CONFIG_USBPD_PHY_QCOM
+	struct power_supply *psy_dc;
+#endif
 
 	if (pd->vconn_enabled) {
 		regulator_disable(pd->vconn);
@@ -3419,6 +3732,27 @@ static void handle_disconnect(struct usbpd *pd)
 
 	pd->in_pr_swap = false;
 	pd->pd_connected = false;
+#ifdef CONFIG_USBPD_PHY_QCOM
+	pd->vendor_id = 0x00;
+	pd->vendor_vdm = 0x00;
+	pd->pd_apdo_connected = false;
+	if (pd->pd_start_direct_charging == true) {
+		usbpd_dbg(&pd->dev, "Stop PCA9468 charging\n");
+		/* Stop Direct Charging */
+		/* Get power supply name */
+		psy_dc = power_supply_get_by_name("pca9468-mains");
+		if (psy_dc == NULL) {
+			usbpd_err(&pd->dev, "Error Get the direct charging psy\n");
+		} else {
+			/* Set the enable direct charging */
+			val.intval = 0;
+			power_supply_set_property(psy_dc, POWER_SUPPLY_PROP_CHARGING_ENABLED, &val);							
+			power_supply_set_property(psy_dc, POWER_SUPPLY_PROP_NUBIA_FAST_CHARGE, &val);
+		}
+	}
+	pd->pd_start_direct_charging = false;
+	pd->pd_start_qc4_charging = false;
+#endif
 	pd->in_explicit_contract = false;
 	pd->hard_reset_recvd = false;
 	pd->caps_count = 0;
@@ -3490,8 +3824,34 @@ static void handle_disconnect(struct usbpd *pd)
 static void handle_hard_reset(struct usbpd *pd)
 {
 	union power_supply_propval val = {0};
+#ifdef CONFIG_USBPD_PHY_QCOM
+	struct power_supply *psy_dc;
+#endif
 
 	pd->hard_reset_recvd = false;
+#ifdef CONFIG_USBPD_PHY_QCOM
+	/* When PD Hardreset happened or start PD at the first time */
+	/* Stop the direct charging */
+	pd->vendor_id = 0x00;
+	pd->vendor_vdm = 0x00;
+	pd->pd_apdo_connected = false;
+	if (pd->pd_start_direct_charging == true) {
+		usbpd_dbg(&pd->dev, "Stop PCA9468 charging\n");
+		/* Stop Direct Charging */
+		/* Get power supply name */
+		psy_dc = power_supply_get_by_name("pca9468-mains");
+		if (psy_dc == NULL) {
+			usbpd_err(&pd->dev, "Error Get the direct charging psy\n");
+		} else {
+			/* Set the enable direct charging */
+			val.intval = 0;
+			power_supply_set_property(psy_dc, POWER_SUPPLY_PROP_CHARGING_ENABLED, &val);
+			power_supply_set_property(psy_dc, POWER_SUPPLY_PROP_NUBIA_FAST_CHARGE, &val);
+		}
+	}
+	pd->pd_start_direct_charging = false;
+	pd->pd_start_qc4_charging = false;
+#endif
 
 	if (pd->requested_current) {
 		val.intval = pd->requested_current = 0;
@@ -4177,6 +4537,13 @@ static ssize_t select_pdo_store(struct device *dev,
 	int src_cap_id;
 	int pdo, uv = 0, ua = 0;
 	int ret;
+
+#ifdef CONFIG_USBPD_PHY_QCOM
+	if (pd->pd_start_direct_charging == true) {
+		usbpd_info(&pd->dev, "don't select pdo by userspace if the direct charging is started\n");
+		return size;
+	}
+#endif
 
 	mutex_lock(&pd->swap_lock);
 

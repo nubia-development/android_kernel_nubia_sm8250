@@ -417,6 +417,9 @@ struct fg_dev {
 	struct power_supply	*dc_psy;
 	struct power_supply	*parallel_psy;
 	struct power_supply	*pc_port_psy;
+#ifdef CONFIG_USBPD_PHY_QCOM
+	struct power_supply *dc_chg_psy;
+#endif
 	struct fg_irq_info	*irqs;
 	struct votable		*awake_votable;
 	struct votable		*delta_bsoc_irq_en_votable;
@@ -524,6 +527,9 @@ extern int fg_get_sram_prop(struct fg_dev *fg, enum fg_sram_param_id id,
 	int *val);
 extern int fg_get_msoc_raw(struct fg_dev *fg, int *val);
 extern int fg_get_msoc(struct fg_dev *fg, int *val);
+#if defined(CONFIG_NUBIA_MSOC_FEATURE)
+extern int fg_get_msoc_nubia(struct fg_dev *fg, int *val);
+#endif
 extern const char *fg_get_battery_type(struct fg_dev *fg);
 extern int fg_get_battery_resistance(struct fg_dev *fg, int *val);
 extern int fg_get_battery_voltage(struct fg_dev *fg, int *val);

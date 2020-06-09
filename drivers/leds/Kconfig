@@ -702,6 +702,17 @@ config LEDS_POWERNV
 	  To compile this driver as a module, choose 'm' here: the module
 	  will be called leds-powernv.
 
+config ZTEMT_BREATH_LEDS
+       tristate "LED support for Qualcomm Technologies, Inc. TRI_LED"
+        depends on LEDS_QTI_TRI_LED
+        help
+          This macro just for nubia led feature
+
+config ZTEMT_LED_BRIGHTNESS_CTL
+       tristate "LED support for Qualcomm Technologies, Inc. TRI_LED"
+        depends on LEDS_QTI_TRI_LED
+        help
+          This macro just for nubia led feature
 config LEDS_SYSCON
 	bool "LED support for LEDs on system controllers"
 	depends on LEDS_CLASS=y
@@ -786,5 +797,9 @@ config LEDS_QPNP_VIBRATOR_LDO
 
 comment "LED Triggers"
 source "drivers/leds/trigger/Kconfig"
+
+#NUBIA LED START
+source "drivers/leds/nubia_led/Kconfig"
+#NUBIA LED END
 
 endif # NEW_LEDS

@@ -149,6 +149,13 @@ config POWER_RESET_QCOM
 	  Say Y here if you have a Qualcomm Tecnologies, Inc. board and wish to
 	  enable restart driver.
 
+config NUBIA_PANIC_BOOTMODE
+        bool "nubia panic bootmode"
+        depends on POWER_RESET_QCOM
+        default y
+        help
+          nubia panic bootmode.
+
 config POWER_RESET_QNAP
 	bool "QNAP power-off driver"
 	depends on OF_GPIO && PLAT_ORION

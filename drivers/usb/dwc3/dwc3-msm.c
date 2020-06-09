@@ -3329,6 +3329,31 @@ static ssize_t orientation_store(struct device *dev,
 
 static DEVICE_ATTR_RW(orientation);
 
+static ssize_t cc_orientation_show(struct device *dev,
+                struct device_attribute *attr, char *buf)
+{
+        struct dwc3_msm *mdwc = dev_get_drvdata(dev);
+
+        if (mdwc->typec_orientation == ORIENTATION_CC1)
+                return scnprintf(buf, PAGE_SIZE, "CC1\n");
+        if (mdwc->typec_orientation == ORIENTATION_CC2)
+                return scnprintf(buf, PAGE_SIZE, "CC2\n");
+
+        return scnprintf(buf, PAGE_SIZE, "none\n");
+}
+
+static ssize_t cc_orientation_store(struct device *dev,
+                struct device_attribute *attr, const char *buf, size_t count)
+{
+        struct dwc3_msm *mdwc = dev_get_drvdata(dev);
+
+        if (sysfs_streq(buf, "none"))
+                mdwc->typec_orientation = ORIENTATION_NONE;
+        return count;
+}
+
+static DEVICE_ATTR_RW(cc_orientation);
+
 static ssize_t mode_show(struct device *dev, struct device_attribute *attr,
 		char *buf)
 {
@@ -3889,6 +3914,7 @@ static int dwc3_msm_probe(struct platform_device *pdev)
 	}
 
 	device_create_file(&pdev->dev, &dev_attr_orientation);
+	device_create_file(&pdev->dev, &dev_attr_cc_orientation);
 	device_create_file(&pdev->dev, &dev_attr_mode);
 	device_create_file(&pdev->dev, &dev_attr_speed);
 	device_create_file(&pdev->dev, &dev_attr_usb_compliance_mode);
@@ -3915,6 +3941,7 @@ static int dwc3_msm_remove(struct platform_device *pdev)
 	int ret_pm;
 
 	device_remove_file(&pdev->dev, &dev_attr_mode);
+	device_remove_file(&pdev->dev, &dev_attr_cc_orientation);
 
 	if (mdwc->dpdm_nb.notifier_call) {
 		regulator_unregister_notifier(mdwc->dpdm_reg, &mdwc->dpdm_nb);

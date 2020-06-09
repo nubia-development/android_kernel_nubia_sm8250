@@ -11,6 +11,13 @@ menuconfig INPUT_KEYBOARD
 	  If unsure, say Y.
 
 if INPUT_KEYBOARD
+config NUBIA_KEYBOARD_GAMESWITCH
+        tristate "Keypad NUBIA GameSwitchkey"
+        depends on KEYBOARD_GPIO
+        default y
+        help
+          Addr GameSwitchkey attr
+
 
 config KEYBOARD_ADC
 	tristate "ADC Ladder Buttons"
@@ -755,5 +762,8 @@ config KEYBOARD_MTK_PMIC
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called pmic-keys.
+
+source "drivers/input/keyboard/cy8c4014l_touchkey/Kconfig"
+source "drivers/input/keyboard/cy8c4014l_touchkey_left/Kconfig"
 
 endif

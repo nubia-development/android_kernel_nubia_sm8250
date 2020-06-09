@@ -817,6 +817,9 @@ int fg_dump_regs(struct fg_dev *fg)
 int fg_restart(struct fg_dev *fg, int wait_time_ms)
 {
 	union power_supply_propval pval = {0, };
+	#if defined(CONFIG_NUBIA_MSOC_FEATURE)
+	union power_supply_propval msoc_pval = {0, };
+	#endif
 	int rc;
 	bool tried_again = false;
 
@@ -829,6 +832,15 @@ int fg_restart(struct fg_dev *fg, int wait_time_ms)
 		pr_err("Error in getting capacity, rc=%d\n", rc);
 		return rc;
 	}
+
+	#if defined(CONFIG_NUBIA_MSOC_FEATURE)
+	rc = power_supply_get_property(fg->fg_psy, POWER_SUPPLY_PROP_CAPACITY_MSOC,
+					&msoc_pval);
+	if (rc < 0) {
+		pr_err("Error in getting capacity msoc, rc=%d\n", rc);
+		return rc;
+	}
+	#endif
 
 	fg->last_soc = pval.intval;
 	fg->fg_restarting = true;
@@ -895,12 +907,24 @@ int fg_get_msoc_raw(struct fg_dev *fg, int *val)
 	return 0;
 }
 
+#if defined(CONFIG_NUBIA_MSOC_FEATURE)
+int fg_get_msoc_nubia(struct fg_dev *fg, int *msoc)
+{
+	int rc;
+
+	rc = fg_get_msoc_raw(fg, msoc);	
+	if (rc < 0)
+		return rc;
+	
+	return 0;
+}
+#endif
+
 int fg_get_msoc(struct fg_dev *fg, int *msoc)
 {
 	int rc;
 
-	rc = fg_get_msoc_raw(fg, msoc);
-	if (rc < 0)
+	rc = fg_get_msoc_raw(fg, msoc);	if (rc < 0)
 		return rc;
 
 	/*
