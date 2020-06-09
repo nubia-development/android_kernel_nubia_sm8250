@@ -604,6 +604,10 @@
 #define KEY_SCREENSAVER		0x245	/* AL Screen Saver */
 #define KEY_VOICECOMMAND		0x246	/* Listening Voice Command */
 #define KEY_ASSISTANT		0x247	/* AL Context-aware desktop assistant */
+#ifdef CONFIG_NUBIA_CYPRESS_KEYBOARD_GAMEFIRE
+#define KEY_GAMEFIRE_LEFT      0x248   /* Nubia game fire key left*/
+#define KEY_GAMEFIRE_RIGHT             0x249   /* Nubia game fire key right*/
+#endif
 
 #define KEY_BRIGHTNESS_MIN		0x250	/* Set Brightness to Minimum */
 #define KEY_BRIGHTNESS_MAX		0x251	/* Set Brightness to Maximum */
@@ -799,6 +803,9 @@
 #define SW_HPHR_OVERCURRENT	0x11  /* set = over current on right hph */
 #define SW_MICROPHONE2_INSERT	0x12  /* set = inserted */
 #define SW_UNSUPPORT_INSERT	0x13  /* set = unsupported device inserted */
+#ifdef CONFIG_NUBIA_KEYBOARD_GAMESWITCH
+#define KEY_GAME_SWITCH         0x19
+#endif
 #define SW_MAX			0x20
 #define SW_CNT			(SW_MAX+1)
 

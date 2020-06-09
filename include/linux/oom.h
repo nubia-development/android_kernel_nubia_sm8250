@@ -121,6 +121,7 @@ extern struct task_struct *find_lock_task_mm(struct task_struct *p);
 
 extern void dump_tasks(struct mem_cgroup *memcg,
 		       const nodemask_t *nodemask);
+extern void wake_oom_reaper(struct task_struct *tsk);
 
 #ifdef CONFIG_HAVE_USERSPACE_LOW_MEMORY_KILLER
 extern bool should_ulmk_retry(gfp_t gfp);

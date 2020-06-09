@@ -48,7 +48,6 @@
  * The default maximum commit age, in seconds.
  */
 #define JBD2_DEFAULT_MAX_COMMIT_AGE 5
-
 #ifdef CONFIG_JBD2_DEBUG
 /*
  * Define JBD2_EXPENSIVE_CHECKING to enable more expensive internal
