@@ -23,6 +23,10 @@
 #include <linux/posix_acl.h>
 #include <linux/pid_namespace.h>
 
+//Nubia FileObserver Begin
+#include "file_observer.h"
+//Nubia FileObserver End
+
 MODULE_AUTHOR("Miklos Szeredi <miklos@szeredi.hu>");
 MODULE_DESCRIPTION("Filesystem in Userspace");
 MODULE_LICENSE("GPL");
@@ -1395,6 +1399,10 @@ static int __init fuse_init(void)
 	sanitize_global_limit(&max_user_bgreq);
 	sanitize_global_limit(&max_user_congthresh);
 
+        //Nubia FileObserver Begin
+        fuse_init_file_observer();
+        //Nubia FileObserver End
+
 	return 0;
 
  err_sysfs_cleanup:
@@ -1410,6 +1418,10 @@ static int __init fuse_init(void)
 static void __exit fuse_exit(void)
 {
 	printk(KERN_DEBUG "fuse exit\n");
+
+        //Nubia FileObserver Begin
+        fuse_exit_file_observer();
+        //Nubia FileObserver End
 
 	fuse_ctl_cleanup();
 	fuse_sysfs_cleanup();

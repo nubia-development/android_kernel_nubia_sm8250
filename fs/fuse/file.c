@@ -19,6 +19,10 @@
 #include <linux/falloc.h>
 #include <linux/uio.h>
 
+//Nubia FileObserver Begin
+#include "file_observer.h"
+//Nubia FileObserver End
+
 static const struct file_operations fuse_direct_io_file_operations;
 
 static int fuse_send_open(struct fuse_conn *fc, u64 nodeid, struct file *file,
@@ -57,6 +61,12 @@ struct fuse_file *fuse_file_alloc(struct fuse_conn *fc)
 		kfree(ff);
 		return NULL;
 	}
+
+        //Nubia FileObserver Begin
+        //ff->creator = NULL;
+        memset(&ff->creator, 0, sizeof(struct fuse_file_creator));
+        ff->mask = 0;
+        //Nubia FileObserver End
 
 	INIT_LIST_HEAD(&ff->write_entry);
 	refcount_set(&ff->count, 1);
@@ -278,7 +288,12 @@ void fuse_release_common(struct file *file, bool isdir)
 
 static int fuse_open(struct inode *inode, struct file *file)
 {
-	return fuse_open_common(inode, file, false);
+        int ret = 0;
+	ret = fuse_open_common(inode, file, false);
+        //Nubia FileObserver Begin
+        //fuse_post_file_open(file);
+        //Nubia FileObserver End
+        return ret;
 }
 
 static int fuse_release(struct inode *inode, struct file *file)
@@ -291,6 +306,9 @@ static int fuse_release(struct inode *inode, struct file *file)
 
 	fuse_release_common(file, false);
 
+        //Nubia FileObserver Begin
+        fuse_post_file_release(inode, file);
+        //Nubia FileObserver End
 	/* return value is ignored by VFS */
 	return 0;
 }
@@ -1237,6 +1255,10 @@ static ssize_t fuse_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 		if (written >= 0)
 			iocb->ki_pos += written;
 	}
+
+        //Nubia FileObserver Begin
+        fuse_post_file_write(file);
+        //Nubia FileObserver End
 out:
 	current->backing_dev_info = NULL;
 	inode_unlock(inode);
@@ -2513,6 +2535,11 @@ long fuse_do_ioctl(struct file *file, unsigned int cmd, unsigned long arg,
 	if (flags & FUSE_IOCTL_COMPAT)
 		inarg.flags |= FUSE_IOCTL_32BIT;
 #endif
+//Nubia FileObserver Begin
+        if(fuse_do_fileobserver_ioctl(file, cmd, arg, flags)) {
+            return 0;
+        }
+//Nubia FileObserver End
 
 	/* assume all the iovs returned by client always fits in a page */
 	BUILD_BUG_ON(sizeof(struct fuse_ioctl_iovec) * FUSE_IOCTL_MAX_IOV > PAGE_SIZE);

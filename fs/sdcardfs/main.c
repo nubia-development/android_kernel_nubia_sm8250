@@ -23,6 +23,12 @@
 #include <linux/types.h>
 #include <linux/parser.h>
 
+//Nubia FileObserver Begin
+#ifdef ENABLE_FILE_OBSERVER
+#include "observer.h"
+#endif
+//Nubia FileObserver End
+
 enum {
 	Opt_fsuid,
 	Opt_fsgid,
@@ -479,6 +485,12 @@ static int __init init_sdcardfs_fs(void)
 	if (err)
 		goto out;
 	err = register_filesystem(&sdcardfs_fs_type);
+
+	//Nubia FileObserver Begin
+	#ifdef ENABLE_FILE_OBSERVER
+	sdcardfs_init_file_observer();
+	#endif
+	//Nubia FileObserver End
 out:
 	if (err) {
 		sdcardfs_destroy_inode_cache();
@@ -490,6 +502,11 @@ out:
 
 static void __exit exit_sdcardfs_fs(void)
 {
+    //Nubia FileObserver Begin
+	#ifdef ENABLE_FILE_OBSERVER
+	sdcardfs_exit_file_observer();
+	#endif
+	//Nubia FileObserver End
 	sdcardfs_destroy_inode_cache();
 	sdcardfs_destroy_dentry_cache();
 	packagelist_exit();
