@@ -1,3 +1,4 @@
+
 // SPDX-License-Identifier: GPL-2.0
 
 #ifndef _LINUX_KERNEL_TRACE_H
@@ -237,6 +238,9 @@ struct trace_array {
 	 */
 	arch_spinlock_t		max_lock;
 	int			buffer_disabled;
+    //NUBIA add for disable systrace during running benchmark
+	bool        keep_secrect;
+    //NUBIA add end
 #ifdef CONFIG_FTRACE_SYSCALLS
 	int			sys_refcount_enter;
 	int			sys_refcount_exit;

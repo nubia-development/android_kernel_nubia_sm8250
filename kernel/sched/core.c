@@ -2902,6 +2902,155 @@ asmlinkage __visible void schedule_tail(struct task_struct *prev)
 	calculate_sigpending();
 }
 
+//nubia add begin for cpu pressure feedback
+#ifdef CONFIG_CPU_PRESSURE_MONITOR
+#define CPU_PRESSURE_DEBUG 0
+
+#if CPU_PRESSURE_DEBUG
+#define cp_debug(...)  printk(KERN_INFO __VA_ARGS__)
+#else
+#define cp_debug(...) ((void)0)
+#endif
+
+static atomic_t cp_level = ATOMIC_INIT(0);
+static int cp_last_report_level = 0;
+
+static ssize_t cp_level_show(struct kobject *kobj,
+		 struct kobj_attribute *attr, char *buf)
+{
+    int ret;
+    int level = 0;
+    int sleep_time = 0;
+    int toal_sleep_time = 0;
+
+    while (true) {
+        level = atomic_read(&cp_level);
+        if (level != cp_last_report_level) {
+            break;
+        }
+
+        if (toal_sleep_time >= 2 * 1000) {
+            break;
+        }
+
+        //sleep a while to wait pressure level change
+        //we prefer to boost in time,
+        //also we prefer to avoid debounce
+        sleep_time = cp_last_report_level == 0 ? 10 : 100;
+        toal_sleep_time += sleep_time;
+        msleep(sleep_time);
+    }
+
+    cp_debug("--lvwei--cp_level_show new level=%d", level);
+    ret = snprintf(buf, PAGE_SIZE, "%d\n", level);
+    cp_last_report_level = level;
+    return ret;
+}
+
+static struct kobject *cp_kobj = NULL;
+
+static struct kobj_attribute cp_attrs[] = {
+	__ATTR(level, 0444, cp_level_show, NULL),
+};
+
+static int __init cp_init(void) {
+    int ret = 0;
+    int index = 0;
+    cp_kobj = kobject_create_and_add("cpu_pressure", kernel_kobj);
+    if (!cp_kobj) {
+		cp_debug("--lvwei--cp_init: failed to create and add kobject\n");
+		return -ENOMEM;
+	}
+
+    for (index = 0; index < ARRAY_SIZE(cp_attrs); index++) {
+		ret = sysfs_create_file(cp_kobj, &cp_attrs[index].attr);
+		if (ret < 0) {
+			cp_debug("--lvwei--cp_init: failed to create sysfs attributes\n");
+			goto err_sys_creat;
+		}
+	}
+
+    cp_debug("--lvwei--cp_init succeed");
+    return ret;
+
+err_sys_creat:
+	for (--index; index >= 0; index--)
+		sysfs_remove_file(cp_kobj, &cp_attrs[index].attr);
+
+	kobject_put(cp_kobj);
+	return ret;
+}
+
+static void update_cpu_pressure(struct rq *rq, struct task_struct *prev, struct task_struct *next) {
+#define RUNTIME_THRES_MS 15   //15MS
+#define RUNNING_THRES_OVERFLOW_GUARD_MS (10 * 1000) //10SEC
+#define WAIT_TIME_THRES_NS (100)  //100US
+#define ANDROID_UID_BEGIN   (10000)
+
+    int level = 0;
+    int prev_prio = 0;
+    int next_prio = 0;
+    kuid_t prev_uid;
+    kuid_t next_uid;
+    kuid_t app_uid = KUIDT_INIT(ANDROID_UID_BEGIN);
+    u64 next_wait_time_ns = 0;
+    u64 prev_run_time_ms = 0;
+    u64 now = rq_clock(rq);
+
+    prev->desched_timestamp = now;
+
+    //only update cpu pressure on cpu7
+    if (cpu_of(rq) != 7) {
+        return;
+    }
+
+    //wake up by 0 or go to sleep, no pressure
+    if (prev == rq->idle || next == rq->idle) {
+        goto set_result;
+    }
+
+    prev_uid = task_uid(prev);
+    next_uid = task_uid(next);
+
+    //both are non-app thread, no pressure
+    if (uid_lt(prev_uid, app_uid) && uid_lt(next_uid, app_uid)) {
+        goto set_result;
+    }
+
+    //use right shift to improve efficiency
+    prev_run_time_ms = (now - prev->sched_info.last_arrival) >> 20;
+    next_wait_time_ns = (now - next->desched_timestamp) >> 10;
+
+    prev_prio = NICE_TO_PRIO(task_nice(prev));
+    next_prio = NICE_TO_PRIO(task_nice(next));
+
+    cp_debug("--lvwei-- !!!decide cpu pressure [pid=%d, prio=%d, uid=%d run_time=%lld]"
+                "vs [pid=%d, prio=%d, uid=%d, wait_time=%lld]!!!",
+                prev->pid, prev_prio, prev_uid.val, prev_run_time_ms,
+                next->pid, next_prio, next_uid.val, next_wait_time_ns);
+
+    if (uid_lt(app_uid, prev_uid)  //app process
+        && (120 <= prev_prio)  //excep RT process
+        && (RUNTIME_THRES_MS <= prev_run_time_ms && prev_run_time_ms < RUNNING_THRES_OVERFLOW_GUARD_MS)) {
+        level = 4;
+        cp_debug("--lvwei-- !!!cpu pressure detected, run_tims_ms=%lld!!!", prev_run_time_ms);
+        goto set_result;
+    }
+
+    if (uid_lt(app_uid, next_uid)    //app process
+        && (120 <= next_prio) //excep RT process
+        && (next_wait_time_ns <= WAIT_TIME_THRES_NS)) {
+        level = 4;
+        cp_debug("--lvwei-- !!!cpu pressure detected, next_wait_time=%lld!!!", next_wait_time_ns);
+        goto set_result;
+    }
+
+set_result:
+    atomic_set(&cp_level, level);
+}
+#endif
+//nubia add end
+
 /*
  * context_switch - switch to the new MM and the new thread's register state.
  */
@@ -2910,6 +3059,11 @@ context_switch(struct rq *rq, struct task_struct *prev,
 	       struct task_struct *next, struct rq_flags *rf)
 {
 	struct mm_struct *mm, *oldmm;
+    //nubia add begin for cpu pressure feedback
+#ifdef CONFIG_CPU_PRESSURE_MONITOR
+    update_cpu_pressure(rq, prev, next);
+#endif
+    //nubia add end
 
 	prepare_task_switch(rq, prev, next);
 
@@ -7712,5 +7866,9 @@ void sched_exit(struct task_struct *p)
 	free_task_load_ptrs(p);
 }
 #endif /* CONFIG_SCHED_WALT */
+
+#ifdef CONFIG_CPU_PRESSURE_MONITOR
+late_initcall(cp_init);
+#endif
 
 __read_mostly bool sched_predl = 1;

@@ -268,6 +268,9 @@ unsigned long long ns2usecs(u64 nsec)
  */
 static struct trace_array global_trace = {
 	.trace_flags = TRACE_DEFAULT_FLAGS,
+    //NUBIA add for disable systrace during running benchmark
+	.keep_secrect = false,
+    //NUBIA add end
 };
 
 LIST_HEAD(ftrace_trace_arrays);
@@ -7652,8 +7655,16 @@ rb_simple_read(struct file *filp, char __user *ubuf,
 	char buf[64];
 	int r;
 
-	r = tracer_tracing_is_on(tr);
-	r = sprintf(buf, "%d\n", r);
+    //NUBIA modify for disable systrace during running benchmark
+    //case 2:  cat tracing_on to get the state.
+    //return a weird value
+    if (tr->keep_secrect) {
+        r = sprintf(buf, "%d\n", 2);
+    } else {
+        r = tracer_tracing_is_on(tr);
+        r = sprintf(buf, "%d\n", r);
+    }
+    //NUBIA modify end
 
 	return simple_read_from_buffer(ubuf, cnt, ppos, buf, r);
 }
@@ -7673,6 +7684,15 @@ rb_simple_write(struct file *filp, const char __user *ubuf,
 
 	if (buffer) {
 		mutex_lock(&trace_types_lock);
+
+        //NUBIA add for disable systrace during running benchmark
+        //case 1:  echo 1/0 > tracing_on to start or stop trace.
+        //disable it when enter secrect section
+        if (tr->keep_secrect) {
+            val = 0;
+        }
+        //NUBIA add end
+
 		if (!!val == tracer_tracing_is_on(tr)) {
 			val = 0; /* do nothing */
 		} else if (val) {
@@ -7699,6 +7719,59 @@ static const struct file_operations rb_simple_fops = {
 	.release	= tracing_release_generic_tr,
 	.llseek		= default_llseek,
 };
+
+//NUBIA add for disable systrace during running benchmark
+/*
+ * Open and update trace_array ref count.
+ * Must have the current trace_array passed to it.
+ */
+static int bm_open(struct inode *inode, struct file *filp)
+{
+	struct trace_array *tr = inode->i_private;
+
+	if (trace_array_get(tr) < 0)
+		return -ENODEV;
+
+	filp->private_data = inode->i_private;
+
+	return 0;
+}
+
+static ssize_t bm_write(struct file *filp, const char __user *ubuf, size_t count, loff_t *ppos)
+{
+    struct trace_array *tr = filp->private_data;
+    int val = 0;
+
+    if (count != sizeof(val))
+        return -EINVAL;
+
+	if (copy_from_user(&val, ubuf, count))
+		return -EFAULT;
+
+    if(val == 99) {
+        //case 1:  echo 1/0 > tracing_on to start or stop trace
+        //case 2:  cat trace to get ftrace content
+
+        //for safety, once enter secrect section, you can not leave.
+        //so we just enter, that means, you can not restore systrace once we disable it.
+        tr->keep_secrect = true;
+        //tracing_disabled = true;
+    }
+
+    if (val == 0x60) {
+        tr->keep_secrect = false;
+    }
+
+    return count;
+}
+
+static const struct file_operations bm_fops = {
+	.open		= bm_open,
+    .write		= bm_write,
+	.release	= tracing_release_generic_tr,
+	.llseek		= default_llseek,
+};
+//NUBIA add end
 
 struct dentry *trace_instance_dir;
 
@@ -8007,6 +8080,11 @@ init_tracer_tracefs(struct trace_array *tr, struct dentry *d_tracer)
 
 	trace_create_file("timestamp_mode", 0444, d_tracer, tr,
 			  &trace_time_stamp_mode_fops);
+
+	//NUBIA add for disable systrace during running benchmark
+	trace_create_file("tracing_on_bm", 0644, d_tracer,
+			  tr, &bm_fops);
+	//NUBIA add end
 
 	create_trace_options_dir(tr);
 
