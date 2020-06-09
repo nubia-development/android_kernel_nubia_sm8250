@@ -181,7 +181,7 @@ dtc_cpp_flags  = -Wp,-MD,$(depfile).pre.tmp -nostdinc                    \
 		 $(addprefix -I,$(DTC_INCLUDE))                          \
 		 -undef -D__DTS__
 #nubia: Set nubia overwrite dtsi file
-dtc_cpp_flags += -DNUBIA_OVERWRITE_DTSI_FILE=\"../nubia/$(TARGET_PRODUCT)/head.dtsi\"
+dtc_cpp_flags += -DNUBIA_OVERWRITE_DTSI_FILE=\"../nubia/NX659J/head.dtsi\"
 
 # Useful for describing the dependency of composite objects
 # Usage:
