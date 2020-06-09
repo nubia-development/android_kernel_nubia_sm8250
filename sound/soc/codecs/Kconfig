@@ -104,6 +104,7 @@ config SND_SOC_ALL_CODECS
 	select SND_SOC_MAX9759
 	select SND_SOC_MAX9768 if I2C
 	select SND_SOC_MAX9877 if I2C
+	select SND_SOC_MAX98937 if I2C
 	select SND_SOC_MC13783 if MFD_MC13XXX
 	select SND_SOC_ML26124 if I2C
 	select SND_SOC_MT6351 if MTK_PMIC_WRAP
@@ -1282,7 +1283,11 @@ config SND_SOC_MAX9768
 
 config SND_SOC_MAX9877
 	tristate
-
+	
+config SND_SOC_MAX98937
+	tristate "Audio SMART PA 98937 support"
+	help
+	
 config SND_SOC_MC13783
 	tristate
 
